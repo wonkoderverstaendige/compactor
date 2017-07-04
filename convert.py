@@ -68,7 +68,7 @@ def main(target, crf, preset):
     
     for p in path_list:
         encode(p, crf, preset, out_dir)
-		
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Video Conversion')
 
@@ -77,5 +77,4 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--crf', type=int, default=22)
 
     cli_args = parser.parse_args()
-main(cli_args.target, preset=cli_args.preset, crf=cli_args.crf)		
-		
+    main(cli_args.target, preset=cli_args.preset, crf=cli_args.crf)

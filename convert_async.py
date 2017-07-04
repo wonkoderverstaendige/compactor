@@ -4,6 +4,7 @@ from pathlib import Path
 import asyncio
 from asyncio.subprocess import PIPE, STDOUT
 import sys
+import time
 
 COMMAND = 'ffmpeg -y -hide_banner -i "{in_filepath}" -vf hqdn3d -c:v libx264 -crf 22 -preset veryfast "{out_filepath}"'
 OUTFILE = '{in_filepath.stem}_convert_x264_crf22_veryfast_hqdn3d.avi'
@@ -31,15 +32,25 @@ def fmt_time(s, minimal=True):
 
 
 async def convert(in_filepath, output_dir):
-    print('Starting', in_filepath)
+    t_start = time.time()
     out_filepath = output_dir / Path(OUTFILE.format(**locals()))
     cmd = COMMAND.format(**locals())
+
+    size_in = in_filepath.stat().st_size
+
+    print('Starting {}, {:.2f} MB'.format(in_filepath, size_in / 1e6))
+
     p = await asyncio.create_subprocess_shell(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
     stdout = (await p.communicate())[0].decode('utf-8')
 
     # Write stdout into log file
     with open(str(out_filepath) + '.ffmpeg.log', 'w') as ffmpeg_log:
         ffmpeg_log.write(stdout)
+
+    size_out = out_filepath.stat().st_size
+    duration = time.time() - t_start
+    print("{}: {}, {:.2f} MB, compression: {:.2f}x".format(out_filepath, fmt_time(duration), size_out / 1e6,
+                                                           size_in / size_out))
     return out_filepath
 
 
@@ -67,8 +78,8 @@ def main(target_path, preset, crf, max_procs=DEFAULT_MAX_PROCS):
 
         # Check for completed tasks
         done, pending = loop.run_until_complete(asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED))
-        for d in done:
-            print('Finished', d.result())
+        # for d in done:
+        #     print('Finished', d.result())
 
         # Stop when all done
         if not len(pending) and not len(targets):

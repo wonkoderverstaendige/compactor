@@ -85,6 +85,8 @@ def main(target_path, preset, crf, max_procs=DEFAULT_MAX_PROCS):
         if not len(pending) and not len(targets):
             break
 
+    loop.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Video Conversion')

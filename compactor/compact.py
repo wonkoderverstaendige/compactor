@@ -38,7 +38,7 @@ async def convert(in_filepath, output_dir, preset, crf, overwrite=False):
     return Result(rc, in_filepath, out_filepath if size_out and not rc else None)
 
 
-def main(target_path, max_procs=DEFAULT_MAX_PROCS, move_originals=False, *args, **kwargs):
+def async_convert(target_path, max_procs=DEFAULT_MAX_PROCS, move_originals=False, *args, **kwargs):
     targets = list(target_path.glob('*.avi'))
     if not len(targets):
         return None
@@ -105,7 +105,7 @@ def main(target_path, max_procs=DEFAULT_MAX_PROCS, move_originals=False, *args, 
     sys.exit(len(failures))
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser('AVI Conversion')
 
     parser.add_argument('target', type=str,
@@ -121,5 +121,8 @@ if __name__ == "__main__":
 
     cli_args = parser.parse_args()
 
-    main(Path(cli_args.target).resolve(), preset=cli_args.preset, crf=cli_args.crf,
+    async_convert(Path(cli_args.target).resolve(), preset=cli_args.preset, crf=cli_args.crf,
          max_procs=cli_args.max_procs, move_originals=cli_args.move_originals, overwrite=cli_args.overwrite)
+
+if __name__ == "__main__":
+    main()

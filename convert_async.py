@@ -16,7 +16,6 @@ Result = namedtuple('Result', ['rc', 'in_filepath', 'out_filepath'])
 
 
 async def convert(in_filepath, output_dir, preset, crf, overwrite=False):
-    # t_start = time.time()
     out_filepath = output_dir / Path(OUTFILE.format(**locals()))
     overwrite_flag = '-y' if overwrite else '-n'
     cmd = COMMAND.format(**locals())
@@ -31,12 +30,9 @@ async def convert(in_filepath, output_dir, preset, crf, overwrite=False):
     with open(str(out_filepath) + '.ffmpeg.log', 'w') as ffmpeg_log:
         ffmpeg_log.write(stdout)
 
-    # duration = time.time() - t_start
-    #
     try:
         size_out = out_filepath.stat().st_size
     except FileNotFoundError:
-        # tqdm.write("{}: Conversion failed!".format(in_filepath))
         size_out = None
 
     return Result(rc, in_filepath, out_filepath if size_out and not rc else None)

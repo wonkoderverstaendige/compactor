@@ -56,7 +56,7 @@ def async_convert(target_path, max_procs=DEFAULT_MAX_PROCS, move_originals=False
     pending = []
     results = []
     timestr = time.strftime("%Y%m%d-%H%M%S")
-    with tqdm(targets) as pbar:
+    with tqdm(targets, unit='avi') as pbar:
         while True:
             pending = list(pending)
 

@@ -9,8 +9,13 @@ from tqdm import tqdm
 import shutil
 from collections import namedtuple
 
-COMMAND = 'ffmpeg {overwrite_flag} -hide_banner -i "{in_filepath}" -vf hqdn3d -c:v libx264 -crf {crf} -preset {preset} "{out_filepath}"'
+COMMAND = 'ffmpeg {overwrite_flag} -hide_banner -i "{in_filepath}" -vf hqdn3d' \
+          ' -c:v libx264 -crf {crf} -preset {preset} "{out_filepath}"'
 OUTFILE = '{in_filepath.stem}_convert_x264_crf{crf}_{preset}_hqdn3d.avi'
+# TODO: Numeric wildcards in glob pattern (####)
+DEFAULT_GLOB = '*.avi'
+DEFAULT_FC2_GLOB = 'fc2_save_????-??-??-??????-????.avi'
+
 DEFAULT_MAX_PROCS = 3
 Result = namedtuple('Result', ['rc', 'in_filepath', 'out_filepath'])
 
@@ -108,7 +113,7 @@ def async_convert(target_path, max_procs=DEFAULT_MAX_PROCS, move_originals=False
 def main():
     parser = argparse.ArgumentParser('AVI Conversion')
 
-    parser.add_argument('target', type=str,
+    parser.add_argument('target', type=str, default='.',
                         help='Target directory containing avi files.')
     parser.add_argument('--preset', default='veryfast',
                         help='Encoder preset. Veryfast seems to give great results for some reason.')
@@ -118,11 +123,16 @@ def main():
                         help='Default maximum number of concurrent encoding processes')
     parser.add_argument('-M', '--move_originals', action='store_true', help='Move the originals. Helps with deleting.')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files.')
+    parser.add_argument('-g', '--glob', default=DEFAULT_GLOB, help='Glob pattern for target selection.')
+    parser.add_argument('-C', '--concatenate', action='store_true',
+                        help='Concatenate stacking files (e.g. 2GB splits by FlyCapture)')
 
     cli_args = parser.parse_args()
 
-    async_convert(Path(cli_args.target).resolve(), preset=cli_args.preset, crf=cli_args.crf,
-         max_procs=cli_args.max_procs, move_originals=cli_args.move_originals, overwrite=cli_args.overwrite)
+    async_convert(Path(cli_args.target).resolve(), preset=cli_args.preset, crf=cli_args.crf, glob=cli_args.glob,
+                  concatenate=cli_args.concatenate, max_procs=cli_args.max_procs,
+                  move_originals=cli_args.move_originals, overwrite=cli_args.overwrite)
+
 
 if __name__ == "__main__":
     main()

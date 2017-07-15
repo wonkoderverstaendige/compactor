@@ -42,7 +42,7 @@ async def async_convert(batch_item, output_dir, tmp_dir, preset, crf, scale=None
     rc = p.returncode
 
     # Write stdout into log file
-    with open(str(out_filepath).replace('#', '') + '.ffmpeg.log', 'w') as ffmpeg_log:
+    with open(str(out_filepath) + '.ffmpeg.log', 'w') as ffmpeg_log:
         ffmpeg_log.write(stdout)
 
     try:

@@ -11,4 +11,4 @@ setup(name='compactor',
       install_requires=['tqdm'],
       packages=['compactor'],
       entry_points="""[console_scripts]
-            compactor=compactor.compact:main""")
+            compactor=compactor.compactor:main""")

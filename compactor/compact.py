@@ -1,32 +1,42 @@
 #!/usr/bin/env python3
 import argparse
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import asyncio
 from asyncio.subprocess import PIPE, STDOUT
 import sys
 import time
 from tqdm import tqdm
-import shutil
 from collections import namedtuple
+import shutil
 
-COMMAND = 'ffmpeg {overwrite_flag} -hide_banner -i "{in_filepath}" -vf hqdn3d' \
-          ' -c:v libx264 -crf {crf} -preset {preset} "{out_filepath}"'
-OUTFILE = '{in_filepath.stem}_convert_x264_crf{crf}_{preset}_hqdn3d.avi'
-# TODO: Numeric wildcards in glob pattern (####)
+COMMAND = 'ffmpeg {overwrite_flag} -f  concat -safe 0 -i "{tmp_file.name}" ' \
+          '-vf hqdn3d -c:v libx264 -crf {crf} -preset {preset} "{out_filepath}"'
+OUTFILE = '{batch_key.stem}_x264_crf{crf}_{preset}_hqdn3d.avi'
+
 DEFAULT_GLOB = '*.avi'
-DEFAULT_FC2_GLOB = 'fc2_save_????-??-??-??????-????.avi'
+DEFAULT_FC2_GLOB = 'fc2_save_????-??-??-??????-####.avi'
 
 DEFAULT_MAX_PROCS = 3
-Result = namedtuple('Result', ['rc', 'in_filepath', 'out_filepath'])
+
+RESULT_FILE_EXISTS = -1
+RESULT_CODE_DICT = {-1: 'File exists, not overwriting.'}
+Result = namedtuple('Result', ['rc', 'in_files', 'out_filepath'])
 
 
-async def convert(in_filepath, output_dir, preset, crf, overwrite=False):
-    out_filepath = output_dir / Path(OUTFILE.format(**locals()))
+async def async_convert(batch_item, output_dir, tmp_dir, preset, crf, scale=None, overwrite=False):
     overwrite_flag = '-y' if overwrite else '-n'
+    batch_key, in_files = batch_item
+    out_filepath = output_dir / Path(OUTFILE.format(**locals()))
+
+    if not overwrite and out_filepath.exists():
+        return Result(RESULT_FILE_EXISTS, in_files, out_filepath)
+
+    with open(tmp_dir / (batch_key.stem + '.tmp'), 'w+') as tmp_file:
+        for f in in_files:
+            tmp_file.write("file '{}'\n".format(f))
+
     cmd = COMMAND.format(**locals())
-
-    # size_in = in_filepath.stat().st_size
-
     p = await asyncio.create_subprocess_shell(cmd, stdin=PIPE, stdout=PIPE, stderr=STDOUT)
     stdout = (await p.communicate())[0].decode('utf-8')
     rc = p.returncode
@@ -40,13 +50,48 @@ async def convert(in_filepath, output_dir, preset, crf, overwrite=False):
     except FileNotFoundError:
         size_out = None
 
-    return Result(rc, in_filepath, out_filepath if size_out and not rc else None)
+    return Result(rc=rc, in_files=in_files, out_filepath=out_filepath)
 
 
-def async_convert(target_path, max_procs=DEFAULT_MAX_PROCS, move_originals=False, *args, **kwargs):
-    targets = list(target_path.glob('*.avi'))
-    if not len(targets):
-        return None
+def main():
+    # FIXME Glob exclusion (e.g. 'x264')
+    # FIXME Python version enforcement
+
+    parser = argparse.ArgumentParser('AVI Conversion')
+
+    parser.add_argument('target', type=str, default='.',
+                        help='Target directory containing avi files.')
+    parser.add_argument('--preset', default='veryfast',
+                        help='Encoder preset. Veryfast seems to give great results for some reason.')
+    parser.add_argument('-c', '--crf', type=int, default=22,
+                        help='CRF quality factor. Decrease to improve quality.')
+    parser.add_argument('-P', '--max_procs', type=int, default=DEFAULT_MAX_PROCS,
+                        help='Default maximum number of concurrent encoding processes')
+    parser.add_argument('-O', '--move_originals', action='store_true', help='Move the originals. Helps with deleting.')
+    parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files.')
+    parser.add_argument('-g', '--glob', default=DEFAULT_GLOB, help='Glob pattern for target selection.')
+
+    parser.add_argument('-M', '--masked', action='store_true', help='File glob has mask')
+    parser.add_argument('-m', '--mask', help='File glob pattern and mask. Overrides glob.', default=DEFAULT_FC2_GLOB)
+
+    cli_args = parser.parse_args()
+
+    glob = cli_args.mask.replace('#', '?') if cli_args.masked else cli_args.glob
+    target_path = Path(cli_args.target).resolve()
+    files = sorted(target_path.glob(glob))
+    if not files:
+        print('No matching files found.')
+        return
+
+    if cli_args.masked:
+        print(f'Running in masked file name mode with mask {cli_args.mask}')
+        stems = set([''.join([l if cli_args.mask[n] != '#' else '#' for n, l in enumerate(f.name)]) for f in files])
+        batches = {Path(m).resolve(): [Path(sm).resolve() for sm in sorted(target_path.glob(m.replace('#', '?')))] for m in stems}
+
+    else:
+        batches = {bs: [bs] for bs in files}
+
+    print(f'Found {len(files)} matching files in {len(batches)} batches.')
 
     if sys.platform.startswith('win'):
         loop = asyncio.ProactorEventLoop()  # for subprocess' pipes on Windows
@@ -58,80 +103,61 @@ def async_convert(target_path, max_procs=DEFAULT_MAX_PROCS, move_originals=False
     if not output_dir.exists():
         Path.mkdir(output_dir)
 
-    pending = []
-    results = []
-    timestr = time.strftime("%Y%m%d-%H%M%S")
-    with tqdm(targets, unit='avi') as pbar:
-        while True:
-            pending = list(pending)
+    time_str = time.strftime("%Y%m%d-%H%M%S")
+    result_log_path = target_path / 'compactor_{}.log'.format(time_str)
 
-            # Append tasks
-            while len(pending) < max_procs and len(targets):
-                pending.append(convert(targets.pop(), output_dir, *args, **kwargs))
+    results = []
+    pending = set()
+    with TemporaryDirectory() as tmp_dir, tqdm(files, unit='avi') as pbar:
+        tmp_dir_path = Path(tmp_dir).resolve()
+
+        while True:
+            # Add tasks
+            while len(pending) < cli_args.max_procs and len(batches):
+                pending.add(async_convert(
+                    batches.popitem(), output_dir=output_dir, tmp_dir=tmp_dir_path,
+                    crf=cli_args.crf, preset=cli_args.preset, overwrite=cli_args.overwrite)
+                )
 
             # Check for completed tasks
             done, pending = loop.run_until_complete(asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED))
-            results.extend([d.result() for d in done])
-            pbar.update(len(done))
+            results_done = [d.result() for d in done]
+            results.extend(results_done)
+            pbar.update(sum([len(r.in_files) for r in results_done]))
 
             # Stop when all done
-            if not len(pending) and not len(targets):
+            if not len(pending) and not len(batches):
                 break
 
-    loop.close()
+    originals_path = target_path / 'originals'
+    if cli_args.move_originals and not originals_path.exists():
+        Path.mkdir(originals_path)
 
-    # Handle completed conversions
-    result_log_path = target_path / 'transcoded_{}.log'.format(timestr)
-    with open(result_log_path, 'w+') as success_log:
-        for rt in results:
-            success_log.write('Inpath: {}, Outpath: {}\n'.format(
-                rt.in_filepath,
-                rt.out_filepath if rt.out_filepath is not None else '!ERROR ' + str(rt.rc)))
+    # Handle results, both successes and failures
+    with open(result_log_path, 'w+') as result_log:
+        for result in results:
+            # Write result to crappy log file
+            result_log.write('Inpath: {}, Outpath: {}\n'.format(
+                result.in_files,
+                result.out_filepath if not result.rc else '!ERROR ' + str(result.rc)))
 
-    # Shove converted originals into separate dir
-    successes = [result for result in results if not result.rc]
-    if move_originals:
-        originals_path = target_path / 'originals'
-        if not originals_path.exists():
-            Path.mkdir(originals_path)
-
-        for result in tqdm(successes, leave=False, desc='Move originals'):
-            shutil.move(result.in_filepath, originals_path / result.in_filepath.name)
+            # Shove successfully converted originals into separate dir
+            if result.rc == 0 and cli_args.move_originals:
+                    for in_file in result.in_files:
+                        shutil.move(in_file, originals_path / in_file.name)
 
     # Handle failed conversions
-    failures = [result for result in results if result.rc]
+    failures = [result for result in results if result.rc != 0]
     if failures:
-        error_log_path = output_dir / 'errors_{}.log'.format(timestr)
+        error_log_path = output_dir / 'errors_{}.log'.format(time_str)
         print('Failed to convert {} file(s)! See {} for details.'.format(len(failures), error_log_path))
         with open(error_log_path, 'w+') as error_log:
             for failure in failures:
-                error_log.write('Inpath: {}, RC: {}\n'.format(failure.in_filepath, failure.rc))
+                error = RESULT_CODE_DICT[failure.rc] if failure.rc < 0 else f'FFMPEG return code {failure.rc}'
+                error_log.write('Inpath: {}, RC: {}\n'.format(failure.in_files, error))
 
+    loop.close()
     sys.exit(len(failures))
-
-
-def main():
-    parser = argparse.ArgumentParser('AVI Conversion')
-
-    parser.add_argument('target', type=str, default='.',
-                        help='Target directory containing avi files.')
-    parser.add_argument('--preset', default='veryfast',
-                        help='Encoder preset. Veryfast seems to give great results for some reason.')
-    parser.add_argument('-c', '--crf', type=int, default=22,
-                        help='CRF quality factor. Decrease to improve quality.')
-    parser.add_argument('-P', '--max_procs', type=int, default=DEFAULT_MAX_PROCS,
-                        help='Default maximum number of concurrent encoding processes')
-    parser.add_argument('-M', '--move_originals', action='store_true', help='Move the originals. Helps with deleting.')
-    parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files.')
-    parser.add_argument('-g', '--glob', default=DEFAULT_GLOB, help='Glob pattern for target selection.')
-    parser.add_argument('-C', '--concatenate', action='store_true',
-                        help='Concatenate stacking files (e.g. 2GB splits by FlyCapture)')
-
-    cli_args = parser.parse_args()
-
-    async_convert(Path(cli_args.target).resolve(), preset=cli_args.preset, crf=cli_args.crf, glob=cli_args.glob,
-                  concatenate=cli_args.concatenate, max_procs=cli_args.max_procs,
-                  move_originals=cli_args.move_originals, overwrite=cli_args.overwrite)
 
 
 if __name__ == "__main__":

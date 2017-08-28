@@ -66,7 +66,7 @@ def main():
     parser.add_argument('-c', '--crf', type=int, default=22,
                         help='CRF quality factor. Decrease to improve quality.')
     parser.add_argument('-P', '--max_procs', type=int, default=DEFAULT_MAX_PROCS,
-                        help='Default maximum number of concurrent encoding processes')
+                        help='Maximum number of concurrent encoding processes (default {})'.format(DEFAULT_MAX_PROCS))
     parser.add_argument('-O', '--move_originals', action='store_true', help='Move the originals. Helps with deleting.')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files.')
     parser.add_argument('-g', '--glob', default=DEFAULT_GLOB, help='Glob pattern for target selection.')

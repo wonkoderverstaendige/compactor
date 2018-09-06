@@ -11,8 +11,10 @@ from collections import namedtuple
 import shutil
 
 COMMAND = 'ffmpeg {overwrite_flag} -f  concat -safe 0 -i "{tmp_file.name}" ' \
-          '-vf hqdn3d -c:v libx264 -crf {crf} -preset {preset} "{out_filepath}"'
-OUTFILE = '{batch_key.stem}_x264_crf{crf}_{preset}_hqdn3d.avi'
+          '-vf hqdn3d -c:v libx264 -crf {crf} -preset {preset} -pix_fmt yuv420p "{out_filepath}"'
+
+LONG_OUTFILE = '{batch_key.stem}_x264_crf{crf}_{preset}_hqdn3d.avi'
+SHORT_OUTFILE = '{batch_key.stem}.mp4'
 
 DEFAULT_GLOB = '*.avi'
 DEFAULT_FC2_GLOB = 'fc2_save_????-??-??-??????-####.avi'
@@ -24,10 +26,10 @@ RESULT_CODE_DICT = {-1: 'File exists, not overwriting.'}
 Result = namedtuple('Result', ['rc', 'in_files', 'out_filepath'])
 
 
-async def async_convert(batch_item, output_dir, tmp_dir, preset, crf, scale=None, overwrite=False):
+async def async_convert(batch_item, output_dir, output_name, tmp_dir, preset, crf, scale=None, overwrite=False):
     overwrite_flag = '-y' if overwrite else '-n'
     batch_key, in_files = batch_item
-    out_filepath = output_dir / Path(OUTFILE.format(**locals()))
+    out_filepath = output_dir / Path(output_name.format(**locals()))
 
     if not overwrite and out_filepath.exists():
         return Result(RESULT_FILE_EXISTS, in_files, out_filepath)
@@ -63,7 +65,7 @@ def main():
                         help='Target directory containing avi files.')
     parser.add_argument('--preset', default='veryfast',
                         help='Encoder preset. Veryfast seems to give great results for some reason.')
-    parser.add_argument('-c', '--crf', type=int, default=22,
+    parser.add_argument('-c', '--crf', type=int, default=18,
                         help='CRF quality factor. Decrease to improve quality.')
     parser.add_argument('-P', '--max_procs', type=int, default=DEFAULT_MAX_PROCS,
                         help='Maximum number of concurrent encoding processes (default {})'.format(DEFAULT_MAX_PROCS))
@@ -73,6 +75,8 @@ def main():
 
     parser.add_argument('-M', '--masked', action='store_true', help='File glob has mask')
     parser.add_argument('-m', '--mask', help='File glob pattern and mask. Overrides glob.', default=DEFAULT_FC2_GLOB)
+    parser.add_argument('-Q', '--quality_naming', help='Append quality parameters to output filename.',
+                        action='store_true')
 
     cli_args = parser.parse_args()
 
@@ -103,6 +107,8 @@ def main():
     if not output_dir.exists():
         Path.mkdir(output_dir)
 
+    output_name = LONG_OUTFILE if cli_args.quality_naming else SHORT_OUTFILE
+
     time_str = time.strftime("%Y%m%d-%H%M%S")
     result_log_path = target_path / 'compactor_{}.log'.format(time_str)
 
@@ -115,7 +121,7 @@ def main():
             # Add tasks
             while len(pending) < cli_args.max_procs and len(batches):
                 pending.add(async_convert(
-                    batches.popitem(), output_dir=output_dir, tmp_dir=tmp_dir_path,
+                    batches.popitem(), output_dir=output_dir, output_name=output_name, tmp_dir=tmp_dir_path,
                     crf=cli_args.crf, preset=cli_args.preset, overwrite=cli_args.overwrite)
                 )
 

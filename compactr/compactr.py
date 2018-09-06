@@ -114,7 +114,7 @@ def main():
 
     results = []
     pending = set()
-    with TemporaryDirectory() as tmp_dir, tqdm(files, unit='avi') as pbar:
+    with TemporaryDirectory() as tmp_dir, tqdm(files, unit='videos') as pbar:
         tmp_dir_path = Path(tmp_dir).resolve()
 
         while True:
